@@ -28,3 +28,25 @@ export async function saveEntry(entry: Entry): Promise<void> {
     tx.onabort = () => reject(tx.error);
   }); } finally { db.close(); }
 }
+export async function importEntries(entries: Entry[]): Promise<number> {
+  const db = await open();
+  try { return await new Promise<number>((resolve, reject) => {
+    const tx = db.transaction('entries', 'readwrite');
+    const store = tx.objectStore('entries');
+    const request = store.getAll();
+    let count = 0;
+    let conflict = false;
+    request.onsuccess = () => {
+      const existing = new Map((request.result as Entry[]).map(entry => [entry.id, entry]));
+      for (const entry of entries) {
+        const old = existing.get(entry.id);
+        if (old) {
+          if (old.date !== entry.date || old.kind !== entry.kind || old.amount !== entry.amount || old.category !== entry.category || old.memo !== entry.memo) { conflict = true; tx.abort(); return; }
+        } else { store.add(entry); count++; }
+      }
+    };
+    tx.oncomplete = () => resolve(count);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(new Error(conflict ? '同じIDで内容が異なる取引があります。取り込みを中止しました。' : '取り込みに失敗しました。'));
+  }); } finally { db.close(); }
+}
